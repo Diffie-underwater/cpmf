@@ -1,6 +1,6 @@
 data_dir=../../datasets/mvtec_3d
 save_dir=../../datasets/mvtec_3d_multiview
-export DISPLAY=:0
+export DISPLAY=:1
 cd utils
 
 # remove the background
