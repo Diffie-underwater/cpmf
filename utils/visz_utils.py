@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
 import numpy as np
 import open3d as o3d
+import scienceplots
 import seaborn as sns
 
 ##
