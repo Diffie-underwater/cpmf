@@ -2,17 +2,18 @@
 PatchCore logic based on https://github.com/rvorias/ind_knn_ad
 """
 
-from sklearn import random_projection
-from utils.utils import KNNGaussianBlur
-from utils.utils import set_seeds
 import numpy as np
-from sklearn.metrics import roc_auc_score
 import timm
 import torch
+from sklearn import random_projection
+from sklearn.metrics import roc_auc_score
 from tqdm import tqdm
-from utils.au_pro_util import calculate_au_pro
+
 from data.mvtec3d_cpmf import denormalization
+from utils.au_pro_util import calculate_au_pro
+from utils.utils import KNNGaussianBlur, set_seeds
 from utils.visz_utils import *
+
 
 class Dict(dict):
     __setattr__ = dict.__setitem__
@@ -27,13 +28,18 @@ def dict_to_object(dictObj):
         inst[k] = dict_to_object(v)
     return inst
 
+
 class Features(torch.nn.Module):
     # wide_resnet50_2
-    def __init__(self, image_size=224, f_coreset=0.1, coreset_eps=0.9, backbone_name='resnet18'):
+    def __init__(
+        self, image_size=224, f_coreset=0.1, coreset_eps=0.9, backbone_name="resnet18"
+    ):
         super().__init__()
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        self.deep_feature_extractor = ModelINet(device=self.device, backbone_name=backbone_name)
+        self.deep_feature_extractor = ModelINet(
+            device=self.device, backbone_name=backbone_name
+        )
         self.deep_feature_extractor.to(self.device)
         # self.deep_feature_extractor.freeze_parameters(layers=[], freeze_bn=True)
 
@@ -96,7 +102,9 @@ class Features(torch.nn.Module):
 
         # segmentation map
         s_map = min_val.view(1, 1, *feature_map_dims)
-        s_map = torch.nn.functional.interpolate(s_map, size=(self.image_size, self.image_size), mode='bilinear')
+        s_map = torch.nn.functional.interpolate(
+            s_map, size=(self.image_size, self.image_size), mode="bilinear"
+        )
         s_map = self.blur(s_map)
 
         self.image_preds.append(s.numpy())
@@ -112,8 +120,18 @@ class Features(torch.nn.Module):
             self.imgs.append(img)
 
     def draw_anomaly_map(self, save_dir, class_name, use_rgb):
-        plot_sample_o3d(self.pcds, self.imgs, {'x': self.predictions}, self.gts, save_dir, class_name, use_rgb=use_rgb)
-        plot_anomaly_score_distributions({'x':self.predictions}, self.gts, save_dir, class_name)
+        plot_sample_o3d(
+            self.pcds,
+            self.imgs,
+            {"x": self.predictions},
+            self.gts,
+            save_dir,
+            class_name,
+            use_rgb=use_rgb,
+        )
+        plot_anomaly_score_distributions(
+            {"x": self.predictions}, self.gts, save_dir, class_name
+        )
 
     def calculate_metrics(self):
         self.image_preds = np.stack(self.image_preds)
@@ -127,12 +145,18 @@ class Features(torch.nn.Module):
     def run_coreset(self):
         self.patch_lib = torch.cat(self.patch_lib, 0)
         if self.f_coreset < 1:
-            self.coreset_idx = self.get_coreset_idx_randomp(self.patch_lib,
-                                                            n=int(self.f_coreset * self.patch_lib.shape[0]),
-                                                            eps=self.coreset_eps, )
-            self.patch_lib = self.patch_lib[self.coreset_idx] # patch本身的维度并没有变化，而是选择了稀疏的若干特征组成了新的特征库
+            self.coreset_idx = self.get_coreset_idx_randomp(
+                self.patch_lib,
+                n=int(self.f_coreset * self.patch_lib.shape[0]),
+                eps=self.coreset_eps,
+            )
+            self.patch_lib = self.patch_lib[
+                self.coreset_idx
+            ]  # patch本身的维度并没有变化，而是选择了稀疏的若干特征组成了新的特征库
 
-    def get_coreset_idx_randomp(self, z_lib, n=1000, eps=0.90, float16=True, force_cpu=False):
+    def get_coreset_idx_randomp(
+        self, z_lib, n=1000, eps=0.90, float16=True, force_cpu=False
+    ):
         """Returns n coreset idx for given z_lib.
         Performance on AMD3700, 32GB RAM, RTX3080 (10GB):
         CPU: 40-60 it/s, GPU: 500+ it/s (float32), 1500+ it/s (float16)
@@ -155,7 +179,7 @@ class Features(torch.nn.Module):
             print("   Error: could not project vectors. Please increase `eps`.")
 
         select_idx = 0
-        last_item = z_lib[select_idx:select_idx + 1]
+        last_item = z_lib[select_idx : select_idx + 1]
         coreset_idx = [torch.tensor(select_idx)]
         min_distances = torch.linalg.norm(z_lib - last_item, dim=1, keepdims=True)
         # The line below is not faster than linalg.norm, although i'm keeping it in for
@@ -172,28 +196,41 @@ class Features(torch.nn.Module):
             min_distances = min_distances.to("cuda")
 
         for _ in tqdm(range(n - 1)):
-            distances = torch.linalg.norm(z_lib - last_item, dim=1, keepdims=True)  # broadcasting step
+            distances = torch.linalg.norm(
+                z_lib - last_item, dim=1, keepdims=True
+            )  # broadcasting step
             min_distances = torch.minimum(distances, min_distances)  # iterative step
             select_idx = torch.argmax(min_distances)  # selection step
 
             # bookkeeping
-            last_item = z_lib[select_idx:select_idx + 1]
+            last_item = z_lib[select_idx : select_idx + 1]
             min_distances[select_idx] = 0
             coreset_idx.append(select_idx.to("cpu"))
         return torch.stack(coreset_idx)
 
+
 class ModelINet(torch.nn.Module):
     # hrnet_w32, wide_resnet50_2
-    def __init__(self, device, backbone_name='wide_resnet50_2', out_indices=(1, 2, 3), checkpoint_path='',
-                 pool_last=False):
+    def __init__(
+        self,
+        device,
+        backbone_name="wide_resnet50_2",
+        out_indices=(1, 2, 3),
+        checkpoint_path="",
+        pool_last=False,
+    ):
         super().__init__()
         # Determine if to output features.
-        kwargs = {'features_only': True if out_indices else False}
+        kwargs = {"features_only": True if out_indices else False}
         if out_indices:
-            kwargs.update({'out_indices': out_indices})
+            kwargs.update({"out_indices": out_indices})
         print(backbone_name)
-        self.backbone = timm.create_model(model_name=backbone_name, pretrained=True, checkpoint_path=checkpoint_path,
-                                          **kwargs)
+        self.backbone = timm.create_model(
+            model_name=backbone_name,
+            pretrained=True,
+            checkpoint_path=checkpoint_path,
+            **kwargs,
+        )
         self.backbone.eval()
 
         self.device = device
@@ -214,7 +251,6 @@ class ModelINet(torch.nn.Module):
 
         # 最后返回的特征默认是 第2，3尺度的特征
         return features
-
 
     # def freeze_parameters(self, layers, freeze_bn=False):
     #     """ Freeze resent parameters. The layers which are not indicated in the layers list are freeze. """
